@@ -2,30 +2,11 @@ import React, { useState } from 'react';
 import { ResumePreview } from './components/ResumePreview';
 import { AIChat } from './components/AIChat';
 import { FileUpload } from './components/FileUpload';
-import { SuggestionModal } from './components/SuggestionModal';
+import { AgentState } from './lib/types';
 
 export interface ResumeData {
-  personalInfo: {
-    name: string;
-    email: string;
-    phone: string;
-    location: string;
-    summary: string;
-  };
-  experience: Array<{
-    id: string;
-    title: string;
-    company: string;
-    duration: string;
-    description: string[];
-  }>;
-  education: Array<{
-    id: string;
-    degree: string;
-    school: string;
-    year: string;
-  }>;
-  skills: string[];
+  html: string;
+  text: string;
 }
 
 export interface Suggestion {
@@ -40,102 +21,117 @@ export interface Suggestion {
 export default function App() {
   const [resumeData, setResumeData] = useState<ResumeData | null>(null);
   const [currentSuggestion, setCurrentSuggestion] = useState<Suggestion | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSuggestionApplied, setIsSuggestionApplied] = useState(false);
+  const [agentState, setAgentState] = useState<AgentState | null>(null);
 
-  const handleFileUpload = (file: File) => {
-    // Simulate PDF parsing with mock data
-    const mockResumeData: ResumeData = {
-      personalInfo: {
-        name: "John Doe",
-        email: "john.doe@email.com",
-        phone: "+1 (555) 123-4567",
-        location: "San Francisco, CA",
-        summary: "Experienced software engineer with 5+ years of experience in full-stack development. Passionate about creating scalable web applications and leading development teams."
-      },
-      experience: [
-        {
-          id: "exp1",
-          title: "Senior Software Engineer",
-          company: "Tech Corp",
-          duration: "2021 - Present",
-          description: [
-            "Led development of microservices architecture serving 1M+ users",
-            "Implemented CI/CD pipelines reducing deployment time by 60%",
-            "Mentored junior developers and conducted code reviews"
-          ]
+  // 🧩 Handle PDF upload
+  const handleFileUpload = async (file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('http://localhost:8080/pdf/parse', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Failed to parse PDF');
+
+      const resumeData = await response.json();
+      setResumeData(resumeData);
+
+      // Initialize agent state
+      const initialAgentState: AgentState = {
+        resumeData,
+        jobDescription: '',
+        messages: [],
+        appliedChanges: [],
+        currentAnalysis: {
+          step: 'initial',
+          focus: '',
+          suggestions: [],
         },
-        {
-          id: "exp2",
-          title: "Software Engineer",
-          company: "StartupXYZ",
-          duration: "2019 - 2021",
-          description: [
-            "Built responsive web applications using React and Node.js",
-            "Collaborated with design team to implement user-friendly interfaces",
-            "Optimized database queries improving application performance by 40%"
-          ]
-        }
-      ],
-      education: [
-        {
-          id: "edu1",
-          degree: "Bachelor of Science in Computer Science",
-          school: "University of California, Berkeley",
-          year: "2019"
-        }
-      ],
-      skills: [
-        "JavaScript", "TypeScript", "React", "Node.js", "Python", "PostgreSQL", "AWS", "Docker"
-      ]
-    };
+        memory: {
+          userPreferences: {},
+          previousAnalyses: [],
+        },
+      };
 
-    setResumeData(mockResumeData);
+      setAgentState(initialAgentState);
+    } catch (error) {
+      console.error('Error parsing PDF:', error);
+      alert('Failed to parse PDF. Please try again or use a different file.');
+    }
   };
 
+  // 🧩 Handle new suggestion from AI
   const handleSuggestion = (suggestion: Suggestion) => {
     setCurrentSuggestion(suggestion);
-    setIsModalOpen(true);
+    setIsSuggestionApplied(false);
   };
 
   const handleAcceptSuggestion = () => {
     if (!currentSuggestion || !resumeData) return;
-
-    const updatedResumeData = { ...resumeData };
-
-    switch (currentSuggestion.type) {
-      case 'personal':
-        // @ts-ignore - Dynamic key access
-        updatedResumeData.personalInfo[currentSuggestion.field] = currentSuggestion.suggestedValue;
-        break;
-      case 'experience':
-        const expIndex = updatedResumeData.experience.findIndex(exp => 
-          exp.description.some(desc => desc.includes(currentSuggestion.originalValue))
-        );
-        if (expIndex !== -1) {
-          updatedResumeData.experience[expIndex].description = 
-            updatedResumeData.experience[expIndex].description.map(desc =>
-              desc.includes(currentSuggestion.originalValue) ? currentSuggestion.suggestedValue : desc
-            );
-        }
-        break;
-      case 'skills':
-        const skillIndex = updatedResumeData.skills.indexOf(currentSuggestion.originalValue);
-        if (skillIndex !== -1) {
-          updatedResumeData.skills[skillIndex] = currentSuggestion.suggestedValue;
-        }
-        break;
+  
+    const { originalValue, suggestedValue } = currentSuggestion;
+    let { html, text } = resumeData;
+  
+    console.log('🟢 Accepting suggestion:', { originalValue, suggestedValue });
+  
+    // 1️⃣ Remove all tags — pure text for comparison
+    const plainHtml = html
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, '') // remove all tags including <strong>, <em>, etc.
+      .replace(/\s+/g, ' ')
+      .trim();
+  
+    const normalizedOriginal = originalValue.replace(/\s+/g, ' ').trim();
+    const matchIndex = plainHtml.indexOf(normalizedOriginal);
+  
+    // 2️⃣ If not found → just append the suggestion
+    if (matchIndex === -1) {
+      console.warn('⚠️ No match found in plain text, appending at bottom.');
+      html += `<div style="margin-top:6px;padding:6px;border-left:3px solid #22c55e;background:rgba(34,197,94,0.1);">${suggestedValue}</div>`;
+      text += `\n${suggestedValue}`;
+    } else {
+      // 3️⃣ Simple replace — treat everything as text
+      const red = `<span style="background:rgba(239,68,68,0.2);text-decoration:line-through;opacity:0.6;">${originalValue}</span>`;
+      const green = `<div style="margin-top:4px;padding:4px;border-left:3px solid #22c55e;background:rgba(34,197,94,0.1);">${suggestedValue}</div>`;
+  
+      // 4️⃣ Remove formatting before replace
+      const htmlWithoutTags = html.replace(/<\/?(strong|em|b|i|u)>/gi, '');
+  
+      // 5️⃣ Do a basic replacement (case-insensitive)
+      const escapedOriginal = originalValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const simpleRegex = new RegExp(escapedOriginal, 'i');
+      if (simpleRegex.test(htmlWithoutTags)) {
+        html = htmlWithoutTags.replace(simpleRegex, `${red}${green}`);
+      } else {
+        // fallback append
+        html += green;
+      }
+  
+      // 6️⃣ Update text version too
+      text = text.replace(simpleRegex, suggestedValue);
     }
-
+  
+    // 7️⃣ Save the updated resume data
+    const updatedResumeData = { ...resumeData, html, text };
     setResumeData(updatedResumeData);
-    setIsModalOpen(false);
+    setIsSuggestionApplied(true);
     setCurrentSuggestion(null);
   };
+  
 
+
+
+  // 🧩 Reject suggestion
   const handleRejectSuggestion = () => {
-    setIsModalOpen(false);
     setCurrentSuggestion(null);
+    setIsSuggestionApplied(false);
   };
 
+  // 🧩 Render UI
   return (
     <div className="min-h-screen bg-gray-50">
       {!resumeData ? (
@@ -144,28 +140,30 @@ export default function App() {
         </div>
       ) : (
         <div className="flex h-screen">
-          {/* Left Half - Resume Preview */}
+          {/* LEFT: Resume Preview */}
           <div className="w-1/2 bg-white border-r border-gray-200 overflow-y-auto">
-            <ResumePreview resumeData={resumeData} />
+            <ResumePreview
+              key={isSuggestionApplied ? 'updated' : 'original'} // 👈 force re-render on update
+              resumeData={resumeData}
+              suggestion={currentSuggestion || undefined}
+              isApplied={isSuggestionApplied}
+            />
           </div>
 
-          {/* Right Half - AI Chat */}
+          {/* RIGHT: Chat interface */}
           <div className="w-1/2 bg-gray-50 overflow-y-auto">
-            <AIChat 
-              resumeData={resumeData} 
+            <AIChat
+              resumeData={resumeData}
               onSuggestion={handleSuggestion}
+              onAcceptSuggestion={handleAcceptSuggestion}
+              onRejectSuggestion={handleRejectSuggestion}
+              currentSuggestion={currentSuggestion}
+              agentState={agentState || undefined}
+              onAgentStateUpdate={setAgentState}
             />
           </div>
         </div>
       )}
-
-      {/* Suggestion Modal */}
-      <SuggestionModal
-        isOpen={isModalOpen}
-        suggestion={currentSuggestion}
-        onAccept={handleAcceptSuggestion}
-        onReject={handleRejectSuggestion}
-      />
     </div>
   );
 }

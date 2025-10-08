@@ -1,94 +1,123 @@
 import React from 'react';
 import { ResumeData } from '../App';
-import { Mail, Phone, MapPin } from 'lucide-react';
+
+interface Suggestion {
+  id: string;
+  type: 'personal' | 'experience' | 'education' | 'skills';
+  field: string;
+  originalValue: string;
+  suggestedValue: string;
+  reasoning: string;
+}
 
 interface ResumePreviewProps {
   resumeData: ResumeData;
+  suggestion?: Suggestion;
+  isApplied?: boolean;
 }
 
-export const ResumePreview: React.FC<ResumePreviewProps> = ({ resumeData }) => {
+export const ResumePreview: React.FC<ResumePreviewProps> = ({ 
+  resumeData, 
+  suggestion, 
+  isApplied = false 
+}) => {
+  const normalizeText = (text: string) => {
+    return text
+      .replace(/\s+/g, ' ')  // Normalize whitespace
+      .replace(/[^\w\s.,!?]/g, '')  // Remove special characters except basic punctuation
+      .trim()
+      .toLowerCase();
+  };
+
+  const highlightText = (
+    html: string,
+    original: string,
+    suggested: string,
+    isApplied: boolean
+  ) => {
+    if (!original?.trim()) return html;
+  
+    const normalize = (txt: string) =>
+      txt
+        .replace(/<[^>]*>/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/[^\w\s.,;:!?-]/g, '')
+        .trim()
+        .toLowerCase();
+  
+    const normalizedHtml = normalize(html);
+    const normalizedOriginal = normalize(original);
+  
+    const startIdx = normalizedHtml.indexOf(normalizedOriginal);
+    if (startIdx === -1) {
+      console.warn('⚠️ No match found for normalized original text');
+      return html;
+    }
+  
+    // Remove inline formatting tags before comparing
+    const htmlWithoutInlineTags = html.replace(/<\/?(strong|b|em|i|u)>/gi, '');
+  
+    const highlightStyle = isApplied
+      ? 'background-color: rgba(239, 68, 68, 0.2); text-decoration: line-through; opacity: 0.6;'
+      : 'background-color: rgba(239, 68, 68, 0.3); border: 1px solid #ef4444; padding: 2px 4px; border-radius: 3px;';
+  
+    const suggestionStyle =
+      'margin-top: 6px; margin-bottom: 6px; ';
+    const suggestionSpan =
+      `<div style="${suggestionStyle}">` +
+      `<span style="background-color: rgba(34,197,94,0.2); border: 1px solid #22c55e; padding: 2px 4px; border-radius: 3px;">` +
+      suggested +
+      `</span></div>`;
+  
+    // Escape regex special chars in original
+    const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  
+    // Try literal match first
+    let highlightedHtml = htmlWithoutInlineTags.replace(
+      new RegExp(escapedOriginal, 'gi'),
+      (match) => `<span style="${highlightStyle}">${match}</span>${suggestionSpan}`
+    );
+  
+    // If literal match fails, try whitespace-flexible version
+    if (highlightedHtml === htmlWithoutInlineTags) {
+      const flexibleRegex = new RegExp(
+        original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'),
+        'gi'
+      );
+      highlightedHtml = htmlWithoutInlineTags.replace(
+        flexibleRegex,
+        (match) => `<span style="${highlightStyle}">${match}</span>${suggestionSpan}`
+      );
+    }
+  
+    // If still no match, just append suggestion at the end as fallback
+    if (highlightedHtml === htmlWithoutInlineTags) {
+      highlightedHtml += suggestionSpan;
+    }
+  
+    return highlightedHtml;
+  };
+  
+
+  
+
+  const displayHtml = suggestion 
+    ? highlightText(resumeData.html, suggestion.originalValue, suggestion.suggestedValue, isApplied)
+    : resumeData.html;
+
   return (
     <div className="max-w-4xl mx-auto p-8 bg-white">
-      {/* Header */}
-      <div className="border-b border-gray-200 pb-6 mb-6">
-        <h1 className="text-3xl mb-2">{resumeData.personalInfo.name}</h1>
-        <div className="flex flex-wrap gap-4 text-gray-600 mb-4">
-          <div className="flex items-center gap-1">
-            <Mail className="w-4 h-4" />
-            <span>{resumeData.personalInfo.email}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Phone className="w-4 h-4" />
-            <span>{resumeData.personalInfo.phone}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <MapPin className="w-4 h-4" />
-            <span>{resumeData.personalInfo.location}</span>
+      <div 
+        className="resume-preview"
+        dangerouslySetInnerHTML={{ __html: displayHtml }}
+      />
+      {suggestion && !isApplied && (
+        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="text-sm text-blue-800">
+            <strong>💡 Suggestion:</strong> {suggestion.reasoning}
           </div>
         </div>
-        <p className="text-gray-700 leading-relaxed">
-          {resumeData.personalInfo.summary}
-        </p>
-      </div>
-
-      {/* Experience */}
-      <div className="mb-8">
-        <h2 className="text-xl mb-4 text-gray-900">Professional Experience</h2>
-        <div className="space-y-6">
-          {resumeData.experience.map((exp) => (
-            <div key={exp.id} className="border-l-2 border-blue-100 pl-4">
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <h3 className="text-lg text-gray-900">{exp.title}</h3>
-                  <p className="text-gray-600">{exp.company}</p>
-                </div>
-                <span className="text-gray-500 text-sm">{exp.duration}</span>
-              </div>
-              <ul className="space-y-1 text-gray-700">
-                {exp.description.map((desc, index) => (
-                  <li key={index} className="flex items-start">
-                    <span className="inline-block w-1 h-1 bg-gray-400 rounded-full mt-2 mr-3 flex-shrink-0"></span>
-                    <span>{desc}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Education */}
-      <div className="mb-8">
-        <h2 className="text-xl mb-4 text-gray-900">Education</h2>
-        <div className="space-y-3">
-          {resumeData.education.map((edu) => (
-            <div key={edu.id} className="border-l-2 border-green-100 pl-4">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-lg text-gray-900">{edu.degree}</h3>
-                  <p className="text-gray-600">{edu.school}</p>
-                </div>
-                <span className="text-gray-500 text-sm">{edu.year}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Skills */}
-      <div>
-        <h2 className="text-xl mb-4 text-gray-900">Technical Skills</h2>
-        <div className="flex flex-wrap gap-2">
-          {resumeData.skills.map((skill, index) => (
-            <span
-              key={index}
-              className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm"
-            >
-              {skill}
-            </span>
-          ))}
-        </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -1,8 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User } from 'lucide-react';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
 import { ResumeData, Suggestion } from '../App';
+import { ApiService } from '../api/api';
+import { AgentApiService } from '../api/agent.api';
+import { AgentState, AgentResponse } from '../lib/types';
+import { LLMSelector } from './LLMSelector';
 
 interface Message {
   id: string;
@@ -14,19 +18,34 @@ interface Message {
 interface AIChatProps {
   resumeData: ResumeData;
   onSuggestion: (suggestion: Suggestion) => void;
+  onAcceptSuggestion: () => void;
+  onRejectSuggestion: () => void;
+  currentSuggestion: Suggestion | null;
+  agentState?: AgentState;
+  onAgentStateUpdate?: (state: AgentState) => void;
 }
 
-export const AIChat: React.FC<AIChatProps> = ({ resumeData, onSuggestion }) => {
+export const AIChat: React.FC<AIChatProps> = ({ 
+  resumeData, 
+  onSuggestion, 
+  onAcceptSuggestion, 
+  onRejectSuggestion, 
+  currentSuggestion,
+  agentState,
+  onAgentStateUpdate
+}) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       type: 'ai',
-      content: "Hello! I've analyzed your resume. I can help you improve various sections. Try asking me to:\n\n• Enhance your summary\n• Improve job descriptions\n• Suggest better skills\n• Optimize formatting\n\nWhat would you like to work on?",
+      content: "👋 Hi! I'm your AI resume coach. I can see you've uploaded your resume! To give you the best personalized advice, I need to understand your target role.\n\n**Could you please share the job description for the position you're applying to?** This will help me analyze your resume against the specific requirements and identify areas for improvement.\n\nYou can paste the full job posting, or just tell me the job title and key requirements you've seen.",
       timestamp: new Date()
     }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<string>('openai');
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-3.5-turbo');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -37,54 +56,49 @@ export const AIChat: React.FC<AIChatProps> = ({ resumeData, onSuggestion }) => {
     scrollToBottom();
   }, [messages]);
 
-  const generateAIResponse = (userMessage: string): { response: string; suggestion?: Suggestion } => {
-    const lowerMessage = userMessage.toLowerCase();
-    
-    if (lowerMessage.includes('summary') || lowerMessage.includes('about')) {
+  const generateAIResponse = async (userMessage: string): Promise<{ response: string; suggestion?: Suggestion; step?: string; nextAction?: string }> => {
+    try {
+      // Use agent system if available, otherwise fall back to old system
+      if (agentState && onAgentStateUpdate) {
+        const response = await AgentApiService.sendMessage(
+          userMessage, 
+          agentState,
+          selectedProvider as 'openai' | 'gemini' | 'claude',
+          selectedModel
+        );
+        onAgentStateUpdate(response.state);
+        return {
+          response: response.message,
+          suggestion: response.suggestions?.[0],
+          step: response.decision.action,
+          nextAction: response.decision.nextStep,
+        };
+      } else {
+        // Fallback to old system
+        const response = await ApiService.sendChatMessage({
+          message: userMessage,
+          resumeData: resumeData,
+          provider: selectedProvider as 'openai' | 'gemini' | 'claude',
+          model: selectedModel
+        });
+        
+        return {
+          response: response.message,
+          suggestion: response.suggestion,
+          step: response.step,
+          nextAction: response.nextAction
+        };
+      }
+    } catch (error) {
+      console.error('Error calling AI service:', error);
+      
+      // Return a simple error response
       return {
-        response: "I can help improve your summary to be more impactful and specific. Here's a suggestion:",
-        suggestion: {
-          id: Date.now().toString(),
-          type: 'personal',
-          field: 'summary',
-          originalValue: resumeData.personalInfo.summary,
-          suggestedValue: "Results-driven software engineer with 5+ years of experience architecting scalable web applications and leading cross-functional teams. Proven track record of reducing deployment times by 60% and optimizing systems for 1M+ users. Passionate about mentoring developers and implementing cutting-edge technologies.",
-          reasoning: "The new summary is more specific with quantifiable achievements, uses stronger action verbs, and better highlights leadership experience."
-        }
+        response: "I apologize, but I'm having trouble processing your request right now. Please try again or check your connection.",
+        step: 'error',
+        nextAction: 'Please try your request again'
       };
     }
-    
-    if (lowerMessage.includes('experience') || lowerMessage.includes('job')) {
-      return {
-        response: "Let me suggest an improvement for one of your job descriptions to make it more impactful:",
-        suggestion: {
-          id: Date.now().toString(),
-          type: 'experience',
-          field: 'description',
-          originalValue: "Led development of microservices architecture serving 1M+ users",
-          suggestedValue: "Architected and led development of cloud-native microservices platform serving 1M+ users, resulting in 99.9% uptime and 50% improved response times",
-          reasoning: "Added specific technical details (cloud-native), measurable outcomes (99.9% uptime, 50% improvement), and used stronger action verbs."
-        }
-      };
-    }
-    
-    if (lowerMessage.includes('skills') || lowerMessage.includes('technical')) {
-      return {
-        response: "I notice you could enhance your skills section. Here's a suggestion:",
-        suggestion: {
-          id: Date.now().toString(),
-          type: 'skills',
-          field: 'skills',
-          originalValue: "JavaScript",
-          suggestedValue: "JavaScript (ES6+)",
-          reasoning: "Being more specific about JavaScript proficiency (ES6+) shows you're up-to-date with modern language features."
-        }
-      };
-    }
-    
-    return {
-      response: "I can help you improve various aspects of your resume:\n\n• **Summary**: Make it more impactful with specific achievements\n• **Experience**: Add quantifiable results and stronger action verbs\n• **Skills**: Update with current technologies and certifications\n• **Education**: Add relevant coursework or honors\n\nWhat specific area would you like me to focus on?"
-    };
   };
 
   const handleSendMessage = async () => {
@@ -101,9 +115,8 @@ export const AIChat: React.FC<AIChatProps> = ({ resumeData, onSuggestion }) => {
     setInputValue('');
     setIsLoading(true);
 
-    // Simulate AI processing delay
-    setTimeout(() => {
-      const { response, suggestion } = generateAIResponse(inputValue);
+    try {
+      const { response, suggestion, step, nextAction } = await generateAIResponse(inputValue);
       
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -115,17 +128,27 @@ export const AIChat: React.FC<AIChatProps> = ({ resumeData, onSuggestion }) => {
       setMessages(prev => [...prev, aiMessage]);
       setIsLoading(false);
 
-      // If there's a suggestion, show it in the modal
+      // If there's a suggestion, trigger it immediately
       if (suggestion) {
-        setTimeout(() => {
-          onSuggestion(suggestion);
-        }, 500);
+        onSuggestion(suggestion);
       }
-    }, 1000);
+    } catch (error) {
+      console.error('Error handling message:', error);
+      setIsLoading(false);
+      
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'ai',
+        content: "I'm sorry, I encountered an error processing your request. Please try again.",
+        timestamp: new Date()
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSendMessage();
     }
@@ -140,8 +163,46 @@ export const AIChat: React.FC<AIChatProps> = ({ resumeData, onSuggestion }) => {
             <Bot className="w-5 h-5 text-blue-600" />
           </div>
           <div>
-            <h2 className="text-lg text-gray-900">AI Resume Assistant</h2>
-            <p className="text-sm text-gray-600">Get personalized suggestions to improve your resume</p>
+            <h2 className="text-lg text-gray-900">AI Resume Coach</h2>
+            <p className="text-sm text-gray-600">Step-by-step guidance to perfect your resume</p>
+          </div>
+        </div>
+        
+        {/* LLM Selector and Step Progress */}
+        <div className="mt-3 space-y-2">
+          <LLMSelector 
+            onProviderChange={(provider, model) => {
+              setSelectedProvider(provider);
+              setSelectedModel(model);
+            }}
+          />
+          
+          {/* Step Progress Indicator */}
+          <div className="flex items-center space-x-2 text-xs">
+            <div className="flex items-center space-x-1">
+              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+              <span className="text-gray-600">Job Description</span>
+            </div>
+            <div className="w-4 h-px bg-gray-300"></div>
+            <div className="flex items-center space-x-1">
+              <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+              <span className="text-gray-400">Experience</span>
+            </div>
+            <div className="w-4 h-px bg-gray-300"></div>
+            <div className="flex items-center space-x-1">
+              <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+              <span className="text-gray-400">Skills</span>
+            </div>
+            <div className="w-4 h-px bg-gray-300"></div>
+            <div className="flex items-center space-x-1">
+              <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+              <span className="text-gray-400">Achievements</span>
+            </div>
+            <div className="w-4 h-px bg-gray-300"></div>
+            <div className="flex items-center space-x-1">
+              <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+              <span className="text-gray-400">Suggestions</span>
+            </div>
           </div>
         </div>
       </div>
@@ -199,19 +260,61 @@ export const AIChat: React.FC<AIChatProps> = ({ resumeData, onSuggestion }) => {
 
       {/* Input */}
       <div className="p-4 border-t border-gray-200 bg-white">
-        <div className="flex gap-2">
-          <Input
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask for resume improvements..."
-            disabled={isLoading}
-            className="flex-1"
-          />
+        {currentSuggestion && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <p className="text-sm text-blue-800 font-medium mb-2">
+                  💡 Suggestion: {currentSuggestion.reasoning}
+                </p>
+                <div className="text-xs text-blue-600">
+                  <strong>Original:</strong> {currentSuggestion.originalValue}
+                </div>
+                <div className="text-xs text-blue-600 mt-1">
+                  <strong>Suggested:</strong> {currentSuggestion.suggestedValue}
+                </div>
+              </div>
+              <div className="flex gap-2 ml-4">
+                <Button
+                  onClick={onAcceptSuggestion}
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  ✓ Accept
+                </Button>
+                <Button
+                  onClick={onRejectSuggestion}
+                  size="sm"
+                  variant="outline"
+                  className="border-red-300 text-red-600 hover:bg-red-50"
+                >
+                  ✗ Reject
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <Textarea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder="Paste your job description here or ask for resume improvements... (Ctrl/Cmd + Enter to send)"
+              disabled={isLoading}
+              className="min-h-[80px] max-h-[200px] resize-none"
+              rows={3}
+            />
+            <div className="text-xs text-gray-500 mt-1">
+              Tip: Use Ctrl/Cmd + Enter to send, or just Enter for new lines
+            </div>
+          </div>
           <Button 
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isLoading}
             size="icon"
+            className="h-10 w-10 flex-shrink-0"
           >
             <Send className="w-4 h-4" />
           </Button>

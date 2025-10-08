@@ -12,10 +12,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload }) => {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const file = files[0];
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+      if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.endsWith('.docx')) {
         onFileUpload(file);
       } else {
-        alert('Please upload a PDF file');
+        alert('Please upload a DOCX file');
       }
     }
   }, [onFileUpload]);
@@ -28,10 +28,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload }) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       const file = files[0];
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+      if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.endsWith('.docx')) {
         onFileUpload(file);
       } else {
-        alert('Please upload a PDF file');
+        alert('Please upload a DOCX file');
       }
     }
   }, [onFileUpload]);
@@ -56,13 +56,13 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload }) => {
           <div>
             <h3 className="text-lg mb-2 text-gray-900">Upload Your Resume</h3>
             <p className="text-gray-600 mb-4">
-              Drag and drop your PDF resume here, or click to browse
+              Drag and drop your DOCX resume here, or click to browse
             </p>
           </div>
 
           <input
             type="file"
-            accept=".pdf"
+            accept=".docx"
             onChange={handleFileSelect}
             className="hidden"
             id="file-upload"
@@ -73,13 +73,13 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload }) => {
             className="flex items-center gap-2"
           >
             <FileText className="w-4 h-4" />
-            Choose PDF File
+            Choose DOCX File
           </Button>
         </div>
       </div>
 
       <div className="mt-6 text-sm text-gray-500 text-center">
-        <p>Supported format: PDF</p>
+        <p>Supported format: DOCX</p>
         <p>Maximum file size: 10MB</p>
       </div>
     </div>
